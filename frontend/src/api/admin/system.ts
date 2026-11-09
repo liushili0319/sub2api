@@ -70,17 +70,6 @@ export async function getRollbackVersions(): Promise<{ versions: RollbackVersion
 const UPDATE_REQUEST_TIMEOUT_MS = 15 * 60 * 1000
 
 /**
- * Perform system update
- * Downloads and applies the latest version
- */
-export async function performUpdate(): Promise<UpdateResult> {
-  const { data } = await apiClient.post<UpdateResult>('/admin/system/update', undefined, {
-    timeout: UPDATE_REQUEST_TIMEOUT_MS
-  })
-  return data
-}
-
-/**
  * Rollback to a previous version
  * @param version - Target version (e.g. "0.1.146"); omit to restore the local backup binary
  */
@@ -104,7 +93,6 @@ export async function restartService(): Promise<{ message: string }> {
 export const systemAPI = {
   getVersion,
   checkUpdates,
-  performUpdate,
   getRollbackVersions,
   rollback,
   restartService

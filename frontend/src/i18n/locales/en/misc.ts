@@ -31,6 +31,8 @@ export default {
     refresh: 'Refresh',
     sourceMode: 'Source Build',
     sourceModeHint: 'Source build, use git pull to update',
+    manualUpdateHint:
+      'This customized build does not support official one-click updates. Update manually from your own repository.',
     updateNow: 'Update Now',
     updating: 'Updating...',
     updateComplete: 'Update Complete',
