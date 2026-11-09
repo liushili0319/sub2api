@@ -21,6 +21,8 @@ export interface PromptAuditEndpointDraft extends PromptAuditEndpoint {
 }
 
 export interface PromptAuditConfig {
+  scanner_mode?: 'qwen3guard' | 'custom_policy'
+  custom_rules?: string
   enabled: boolean
   blocking_enabled: boolean
   blocking_latest_turn_only: boolean
@@ -44,6 +46,8 @@ export interface PromptAuditDraft extends Omit<PromptAuditConfig, 'endpoints'> {
 }
 
 export interface PromptAuditUpdateRequest {
+  scanner_mode: 'qwen3guard' | 'custom_policy'
+  custom_rules: string
   expected_config_version: number
   enabled: boolean
   blocking_enabled: boolean

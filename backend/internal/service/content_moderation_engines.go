@@ -10,9 +10,11 @@ import (
 const (
 	ContentModerationEngineOpenAI   = "openai"
 	ContentModerationEngineTypeSafe = "typesafe"
+	ContentModerationEngineGroup    = "group"
 )
 
 type ContentModerationEngineConfig struct {
+	GroupID    *int64             `json:"group_id,omitempty"`
 	BaseURL    string             `json:"base_url"`
 	Model      string             `json:"model"`
 	ProxyID    *int64             `json:"proxy_id,omitempty"`
@@ -23,6 +25,7 @@ type ContentModerationEngineConfig struct {
 }
 
 type UpdateContentModerationEngineInput struct {
+	GroupID            *int64              `json:"group_id"`
 	BaseURL            *string             `json:"base_url"`
 	Model              *string             `json:"model"`
 	ProxyID            *int64              `json:"proxy_id"`
@@ -51,13 +54,16 @@ func moderationEngine(engine string) string {
 }
 
 func validModerationEngine(engine string) bool {
-	return engine == ContentModerationEngineOpenAI || engine == ContentModerationEngineTypeSafe
+	return engine == ContentModerationEngineOpenAI || engine == ContentModerationEngineTypeSafe || engine == ContentModerationEngineGroup
 }
 
 func moderationEngineDefaults(engine string) *ContentModerationEngineConfig {
 	p := &ContentModerationEngineConfig{BaseURL: defaultContentModerationBaseURL, Model: defaultContentModerationModel, TimeoutMS: 3000, RetryCount: 2, Thresholds: ContentModerationDefaultThresholds()}
 	if engine == ContentModerationEngineTypeSafe {
 		p.BaseURL, p.Model = "https://api.typesafe.ai", "jev-latest"
+	}
+	if engine == ContentModerationEngineGroup {
+		p.BaseURL, p.Model = "http://127.0.0.1:3000", "deepseek-chat"
 	}
 	return p
 }
@@ -70,7 +76,7 @@ func (cfg *ContentModerationConfig) engineProfile(engine string) *ContentModerat
 		}
 		p = *cfg.TypeSafe
 	} else {
-		p = ContentModerationEngineConfig{BaseURL: cfg.BaseURL, Model: cfg.Model, ProxyID: cfg.ProxyID, APIKeys: cfg.apiKeys(), TimeoutMS: cfg.TimeoutMS, RetryCount: cfg.RetryCount, Thresholds: cfg.Thresholds}
+		p = ContentModerationEngineConfig{GroupID: cfg.GroupID, BaseURL: cfg.BaseURL, Model: cfg.Model, ProxyID: cfg.ProxyID, APIKeys: cfg.apiKeys(), TimeoutMS: cfg.TimeoutMS, RetryCount: cfg.RetryCount, Thresholds: cfg.Thresholds}
 	}
 	p.ProxyID = cloneInt64Ptr(p.ProxyID)
 	p.APIKeys = append([]string(nil), p.APIKeys...)
@@ -79,6 +85,7 @@ func (cfg *ContentModerationConfig) engineProfile(engine string) *ContentModerat
 }
 
 func (cfg *ContentModerationConfig) applyEngineProfile(p *ContentModerationEngineConfig) {
+	cfg.GroupID = cloneInt64Ptr(p.GroupID)
 	cfg.BaseURL, cfg.Model, cfg.ProxyID = p.BaseURL, p.Model, cloneInt64Ptr(p.ProxyID)
 	cfg.APIKey, cfg.APIKeys = "", append([]string(nil), p.APIKeys...)
 	cfg.TimeoutMS, cfg.RetryCount = p.TimeoutMS, p.RetryCount
@@ -102,6 +109,12 @@ func (s *ContentModerationService) updateEngineProfile(ctx context.Context, cfg 
 		p.BaseURL = strings.TrimSpace(*input.BaseURL)
 		if p.BaseURL == "" {
 			p.BaseURL = defaults.BaseURL
+		}
+	}
+	if input.GroupID != nil {
+		p.GroupID = cloneInt64Ptr(input.GroupID)
+		if *input.GroupID <= 0 {
+			p.GroupID = nil
 		}
 	}
 	if input.Model != nil {
@@ -149,7 +162,7 @@ func (s *ContentModerationService) updateEngineProfile(ctx context.Context, cfg 
 	if err := s.validateConfig(ctx, check); err != nil {
 		return err
 	}
-	p = &ContentModerationEngineConfig{BaseURL: check.BaseURL, Model: check.Model, ProxyID: check.ProxyID, APIKeys: check.APIKeys, TimeoutMS: check.TimeoutMS, RetryCount: check.RetryCount, Thresholds: check.Thresholds}
+	p = &ContentModerationEngineConfig{GroupID: check.GroupID, BaseURL: check.BaseURL, Model: check.Model, ProxyID: check.ProxyID, APIKeys: check.APIKeys, TimeoutMS: check.TimeoutMS, RetryCount: check.RetryCount, Thresholds: check.Thresholds}
 	if engine == ContentModerationEngineTypeSafe {
 		cfg.TypeSafe = p
 	} else {
@@ -161,7 +174,7 @@ func (s *ContentModerationService) updateEngineProfile(ctx context.Context, cfg 
 func (s *ContentModerationService) engineConfigView(cfg *ContentModerationConfig) *ContentModerationConfigView {
 	view := s.configView(cfg.effectiveEngine(cfg.Engine))
 	view.EngineConfigs = map[string]*ContentModerationConfigView{}
-	for _, engine := range []string{ContentModerationEngineOpenAI, ContentModerationEngineTypeSafe} {
+	for _, engine := range []string{ContentModerationEngineOpenAI, ContentModerationEngineTypeSafe, ContentModerationEngineGroup} {
 		view.EngineConfigs[engine] = s.configView(cfg.effectiveEngine(engine))
 	}
 	return view

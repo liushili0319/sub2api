@@ -1,7 +1,7 @@
 export default {
   promptAudit: {
     title: '提示词审计',
-    description: '通过 OpenAI 兼容 Qwen3Guard 节点异步复核或同步阻止用户输入；事件的完整提示词会入库保存，仅供管理员复核。',
+    description: '通过审计模型异步复核或同步阻止用户输入；事件的完整提示词会入库保存，仅供管理员复核。',
     configVersion: '配置版本 v{version}',
     tabs: { config: '配置', events: '事件' },
     actions: { refresh: '刷新运行态', retry: '重试', Allow: '放行', Warn: '警告', Block: '阻止' },
@@ -11,6 +11,7 @@ export default {
     decisions: { pass: '通过', flag: '标记', critical: '严重' },
     riskLevels: { low: '低', medium: '中', high: '高', critical: '严重' },
     scanners: {
+      custom_policy: '自定义规则',
       violent: '暴力',
       non_violent_illegal_acts: '非暴力违法行为',
       sexual_content_or_sexual_acts: '色情内容或性行为',
@@ -22,6 +23,7 @@ export default {
       jailbreak: '越狱',
     },
     scannerDescriptions: {
+      custom_policy: '命中自定义审计规则',
       violent: '暴力或暴力威胁',
       non_violent_illegal_acts: '非暴力违法活动',
       sexual_content_or_sexual_acts: '色情内容或性行为',
@@ -51,7 +53,11 @@ export default {
       toggleNode: '切换节点 {name}', deleteConfirm: '从草稿中删除节点“{name}”？保存配置后生效。',
     },
     policy: {
-      title: '审计策略', description: '配置适用分组、九类输入风险、Worker 与队列边界。', scope: '适用范围', allGroups: '全部分组', selectedGroups: '指定分组',
+      scannerMode: '审计模型模式', guardMode: 'Qwen3Guard 分类', customMode: '自定义规则模型',
+      customRules: '自定义拦截规则', customRulesPlaceholder: '例如：拦截包含公司未公开项目代号或客户名单的请求。',
+      customRulesHint: '使用审计节点中的聊天模型判断规则；模型可能误判，请先使用异步模式验证。',
+      recursionHint: '使用本系统分组作为审计节点时，请使用专用 API Key，选择指定分组并排除该 Key 的分组，避免递归调用。内容审计也应排除该分组。',
+      title: '审计策略', description: '配置适用分组、审计模型、规则、Worker 与队列边界。', scope: '适用范围', allGroups: '全部分组', selectedGroups: '指定分组',
       searchGroups: '搜索分组', noGroups: '没有匹配分组', missingGroups: '配置中包含已删除的分组 ID', selectedCount: '已选择 {count} 个分组',
       scanners: 'Qwen3Guard 输入风险分类', workerCount: 'Worker 数量', queueCapacity: '持久队列容量', strategy: '节点策略', strategyHint: '按配置顺序优先尝试，必要时故障切换。',
     },

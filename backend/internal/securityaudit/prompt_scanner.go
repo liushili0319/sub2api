@@ -52,12 +52,14 @@ func AggregateResults(results []*NormalizedResult, latency time.Duration) (*Norm
 			aggregated.ScannerVersion = result.ScannerVersion
 			aggregated.PolicyID = result.PolicyID
 			aggregated.PolicyVersion = result.PolicyVersion
+			aggregated.ScannerBackend = result.ScannerBackend
 		}
 		if aggregated.GuardEndpointID == "" {
 			aggregated.GuardEndpointID = result.GuardEndpointID
 			aggregated.ScannerVersion = result.ScannerVersion
 			aggregated.PolicyID = result.PolicyID
 			aggregated.PolicyVersion = result.PolicyVersion
+			aggregated.ScannerBackend = result.ScannerBackend
 		}
 		for _, category := range result.Categories {
 			categories[category] = struct{}{}

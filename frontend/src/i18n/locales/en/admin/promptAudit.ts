@@ -1,7 +1,7 @@
 export default {
   promptAudit: {
     title: 'Prompt Audit',
-    description: 'Review user input asynchronously or block it synchronously through OpenAI-compatible Qwen3Guard nodes. Full prompts are stored with events for admin review.',
+    description: 'Review user input asynchronously or block it synchronously using audit models. Full prompts are stored with events for admin review.',
     configVersion: 'Config version v{version}',
     tabs: { config: 'Configuration', events: 'Events' },
     actions: { refresh: 'Refresh runtime', retry: 'Retry', Allow: 'Allow', Warn: 'Warn', Block: 'Block' },
@@ -11,6 +11,7 @@ export default {
     decisions: { pass: 'Pass', flag: 'Flag', critical: 'Critical' },
     riskLevels: { low: 'Low', medium: 'Medium', high: 'High', critical: 'Critical' },
     scanners: {
+      custom_policy: 'Custom policy',
       violent: 'Violent',
       non_violent_illegal_acts: 'Non-violent Illegal Acts',
       sexual_content_or_sexual_acts: 'Sexual Content or Sexual Acts',
@@ -22,6 +23,7 @@ export default {
       jailbreak: 'Jailbreak',
     },
     scannerDescriptions: {
+      custom_policy: 'Custom policy violation',
       violent: 'Violence or threats of violence',
       non_violent_illegal_acts: 'Non-violent illegal activity',
       sexual_content_or_sexual_acts: 'Sexual content or sexual acts',
@@ -51,7 +53,11 @@ export default {
       toggleNode: 'Toggle node {name}', deleteConfirm: 'Remove “{name}” from the draft? It takes effect after saving.',
     },
     policy: {
-      title: 'Audit policy', description: 'Configure group scope, nine input-risk categories, workers, and queue bounds.', scope: 'Scope', allGroups: 'All groups', selectedGroups: 'Selected groups',
+      scannerMode: 'Audit model mode', guardMode: 'Qwen3Guard categories', customMode: 'Custom policy model',
+      customRules: 'Custom blocking rules', customRulesPlaceholder: 'For example: block requests containing confidential project names or customer lists.',
+      customRulesHint: 'The configured chat model applies these rules. Model decisions can be inaccurate; test in async mode first.',
+      recursionHint: 'When using this gateway as the audit node, use a dedicated API key and exclude its group from both prompt and content audit scopes to prevent recursive calls.',
+      title: 'Audit policy', description: 'Configure group scope, audit model, rules, workers, and queue bounds.', scope: 'Scope', allGroups: 'All groups', selectedGroups: 'Selected groups',
       searchGroups: 'Search groups', noGroups: 'No matching groups', missingGroups: 'Configured IDs for groups that no longer exist', selectedCount: '{count} groups selected',
       scanners: 'Qwen3Guard input-risk categories', workerCount: 'Worker count', queueCapacity: 'Persistent queue capacity', strategy: 'Node strategy', strategyHint: 'Try nodes in configuration order and fail over when allowed.',
     },

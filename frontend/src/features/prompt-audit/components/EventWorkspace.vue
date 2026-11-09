@@ -198,6 +198,7 @@ function translateRiskLevel(riskLevel: string): string {
   return RISK_LEVELS.has(riskLevel) ? t(`admin.promptAudit.riskLevels.${riskLevel}`) : riskLevel
 }
 function translateCategory(category: string): string {
+  if (category === 'custom_policy') return t('admin.promptAudit.scanners.custom_policy')
   return SCANNER_CATALOG.some((scanner) => scanner.id === category)
     ? t(`admin.promptAudit.scanners.${category}`)
     : category

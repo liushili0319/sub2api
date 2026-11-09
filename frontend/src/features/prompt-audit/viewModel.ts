@@ -30,6 +30,8 @@ export function cloneData<T>(value: T): T {
 export function configToDraft(config: PromptAuditConfig): PromptAuditDraft {
   return {
     ...cloneData(config),
+    scanner_mode: config.scanner_mode ?? 'qwen3guard',
+    custom_rules: config.custom_rules ?? '',
     group_ids: [...(config.group_ids ?? [])],
     scanners: [...(config.scanners ?? [])],
     endpoints: (config.endpoints ?? []).map((endpoint) => ({
@@ -60,6 +62,8 @@ export function createDefaultEndpoint(index = 1): PromptAuditEndpointDraft {
 export function buildUpdateRequest(draft: PromptAuditDraft): PromptAuditUpdateRequest {
   return {
     expected_config_version: draft.config_version,
+    scanner_mode: draft.scanner_mode ?? 'qwen3guard',
+    custom_rules: draft.custom_rules ?? '',
     enabled: draft.enabled,
     blocking_enabled: draft.enabled && draft.blocking_enabled,
     blocking_latest_turn_only: draft.blocking_latest_turn_only,

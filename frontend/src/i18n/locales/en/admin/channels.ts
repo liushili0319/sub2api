@@ -239,6 +239,8 @@ export default {
       activeEngine: 'Active engine: {engine}',
       engineUnavailable: 'No usable Key for the active engine. API auditing is unavailable; failed checks fail open under the existing policy.',
       typeSafeNotice: 'TypeSafe AI audits text only. Images are neither sent nor audited. Thresholds are uncalibrated; switching engines does not disable shared blocking, notifications or automatic bans.',
+      groupEngineNotice: 'The group model uses Chat Completions for risk classification. The selected group provides account routing automatically; exclude the audit group from its own scope to prevent recursion.',
+      groupModelGroup: 'Audit group', groupModelGroupPlaceholder: 'Select the group used for content audit', groupModelRouteHint: 'The gateway uses this group\'s account scheduling and model mapping for Chat Completions. No separate Base URL or API key is required.', groupModelModelPlaceholder: 'Select a model from the group', groupModelGroupRequired: 'Select a content audit group', groupModelModelRequired: 'Select a content audit model', groupModelModelsLoadFailed: 'Could not load models for this group. Check the group configuration and retry.',
       typeSafeThresholds: 'Default thresholds match OpenAI, but the scores are not interchangeable. Adjust each category using actual audit results.',
       auditSource: 'Audit source',
       skippedImages: 'Unaudited images: {count}',

@@ -22,6 +22,7 @@ func NewContentModerationHandler(svc *service.ContentModerationService) *Content
 type contentModerationConfigRequest struct {
 	Engine        *string                                               `json:"engine"`
 	EngineConfigs map[string]service.UpdateContentModerationEngineInput `json:"engine_configs"`
+	GroupID       *int64                                                `json:"group_id"`
 	Enabled       *bool                                                 `json:"enabled"`
 	Mode          *string                                               `json:"mode"`
 	BaseURL       *string                                               `json:"base_url"`
@@ -92,6 +93,7 @@ func (h *ContentModerationHandler) UpdateConfig(c *gin.Context) {
 	}
 	cfg, err := h.service.UpdateConfig(c.Request.Context(), service.UpdateContentModerationConfigInput{
 		Engine: req.Engine, EngineConfigs: req.EngineConfigs,
+		GroupID:                        req.GroupID,
 		Enabled:                        req.Enabled,
 		Mode:                           req.Mode,
 		BaseURL:                        req.BaseURL,

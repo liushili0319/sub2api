@@ -43,6 +43,23 @@
         </div>
 
         <fieldset class="mt-5 border-t border-gray-100 pt-5 dark:border-dark-800">
+          <legend class="text-sm font-medium text-gray-900 dark:text-white">{{ t('admin.promptAudit.policy.scannerMode') }}</legend>
+          <div class="mt-3 flex flex-wrap gap-5 text-sm text-gray-700 dark:text-dark-200">
+            <label class="flex items-center gap-2"><input type="radio" name="prompt-audit-scanner-mode" :checked="draft.scanner_mode !== 'custom_policy'" @change="patch({ scanner_mode: 'qwen3guard' })" />{{ t('admin.promptAudit.policy.guardMode') }}</label>
+            <label class="flex items-center gap-2"><input type="radio" name="prompt-audit-scanner-mode" :checked="draft.scanner_mode === 'custom_policy'" @change="patch({ scanner_mode: 'custom_policy' })" />{{ t('admin.promptAudit.policy.customMode') }}</label>
+          </div>
+        </fieldset>
+
+        <div v-if="draft.scanner_mode === 'custom_policy'" class="mt-5">
+          <label class="block text-sm text-gray-700 dark:text-dark-200">
+            <span class="font-medium">{{ t('admin.promptAudit.policy.customRules') }}</span>
+            <textarea :value="draft.custom_rules ?? ''" maxlength="4000" rows="6" class="input mt-2 w-full" :placeholder="t('admin.promptAudit.policy.customRulesPlaceholder')" @input="patch({ custom_rules: ($event.target as HTMLTextAreaElement).value })" />
+          </label>
+          <p class="mt-2 text-xs text-gray-500 dark:text-dark-400">{{ t('admin.promptAudit.policy.customRulesHint') }}</p>
+          <p class="mt-2 text-xs text-amber-700 dark:text-amber-300">{{ t('admin.promptAudit.policy.recursionHint') }}</p>
+        </div>
+
+        <fieldset v-else class="mt-5 border-t border-gray-100 pt-5 dark:border-dark-800">
           <legend class="text-sm font-medium text-gray-900 dark:text-white">{{ t('admin.promptAudit.policy.scanners') }}</legend>
           <div class="mt-3 grid gap-2 sm:grid-cols-2">
             <label v-for="scanner in SCANNER_CATALOG" :key="scanner.id" class="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-gray-700 hover:bg-gray-50 dark:text-dark-200 dark:hover:bg-dark-800">

@@ -103,6 +103,7 @@ function formatDecisionAction(decision: string, action: string): string {
   return `${decisionLabel} · ${actionLabel}`
 }
 function translateCategory(category: string): string {
+  if (category === 'custom_policy') return t('admin.promptAudit.scanners.custom_policy')
   return SCANNER_CATALOG.some((scanner) => scanner.id === category)
     ? t(`admin.promptAudit.scanners.${category}`)
     : category
@@ -112,6 +113,7 @@ function formatCategories(categories: string[]): string {
   return categories.map(translateCategory).join(', ')
 }
 function translateEvidence(value: string): string {
+  if (value === 'Custom policy') return t('admin.promptAudit.scanners.custom_policy')
   const byId = SCANNER_CATALOG.find((scanner) => scanner.id === value)
   if (byId) return t(`admin.promptAudit.scanners.${byId.id}`)
   const byLabel = SCANNER_CATALOG.find((scanner) => scanner.label === value)

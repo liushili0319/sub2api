@@ -239,6 +239,8 @@ export default {
       activeEngine: '当前生效引擎：{engine}',
       engineUnavailable: '当前引擎没有可用 Key，API 审计不可用；失败请求按现有策略放行。',
       typeSafeNotice: 'TypeSafe AI 仅审文字，图片不外发也不审核。阈值为待校准初值；公共拦截、通知、封禁策略不会随引擎切换而关闭。',
+      groupEngineNotice: '分组模型通过 Chat Completions 判断风险。系统自动使用所选分组的账号和路由；请将内容审计分组排除在自身审计范围之外，避免递归调用。',
+      groupModelGroup: '审计分组', groupModelGroupPlaceholder: '请选择内容审计使用的分组', groupModelRouteHint: '系统会通过该分组的账号调度和模型映射调用 Chat Completions，不需要单独填写 Base URL 或 API Key。', groupModelModelPlaceholder: '请选择分组中的模型', groupModelGroupRequired: '请选择内容审计分组', groupModelModelRequired: '请选择内容审计模型', groupModelModelsLoadFailed: '分组模型列表加载失败，请检查分组配置后重试',
       typeSafeThresholds: '默认阈值与 OpenAI 一致，但两者分数含义不同。请结合实际审核结果调整各类别阈值。',
       auditSource: '审计来源',
       skippedImages: '未审图片：{count}',

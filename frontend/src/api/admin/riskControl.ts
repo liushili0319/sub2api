@@ -1,7 +1,7 @@
 import { apiClient } from '../client'
 
 export type ModerationMode = 'off' | 'observe' | 'pre_block'
-export type ModerationEngine = 'openai' | 'typesafe'
+export type ModerationEngine = 'openai' | 'typesafe' | 'group'
 export interface ModerationEngineMeta {
   engine: ModerationEngine
   model: string
@@ -19,6 +19,7 @@ export interface ContentModerationModelFilter {
 export interface ContentModerationConfig {
   engine?: ModerationEngine
   engine_configs?: Record<ModerationEngine, ContentModerationConfig>
+  group_id?: number | null
   enabled: boolean
   mode: ModerationMode
   base_url: string
@@ -103,6 +104,7 @@ export interface ContentModerationTestAuditResult {
 export interface UpdateContentModerationConfig {
   engine?: ModerationEngine
   engine_configs?: Partial<Record<ModerationEngine, UpdateModerationEngineConfig>>
+  group_id?: number | null
   enabled?: boolean
   mode?: ModerationMode
   base_url?: string
@@ -218,7 +220,7 @@ export interface ContentModerationLog {
 }
 
 export type UpdateModerationEngineConfig = Pick<UpdateContentModerationConfig,
-  'base_url' | 'model' | 'proxy_id' | 'api_keys' | 'api_keys_mode' | 'delete_api_key_hashes' |
+  'group_id' | 'base_url' | 'model' | 'proxy_id' | 'api_keys' | 'api_keys_mode' | 'delete_api_key_hashes' |
   'clear_api_key' | 'timeout_ms' | 'retry_count' | 'thresholds'>
 
 export interface ListContentModerationLogsParams {

@@ -4,7 +4,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import type { DOMWrapper, VueWrapper } from '@vue/test-utils'
 
 import RiskControlView from '../RiskControlView.vue'
-import type { ContentModerationAPIKeyStatus, ContentModerationConfig, UpdateContentModerationConfig } from '@/api/admin/riskControl'
+import type { ContentModerationAPIKeyStatus, ContentModerationConfig, ContentModerationLog, UpdateContentModerationConfig } from '@/api/admin/riskControl'
 
 const {
   getConfig,
@@ -12,6 +12,7 @@ const {
   getStatus,
   listLogs,
   getGroups,
+  getModelAllowlistCandidates,
   getProxies,
   testAPIKeys,
   showError,
@@ -22,6 +23,7 @@ const {
   getStatus: vi.fn(),
   listLogs: vi.fn(),
   getGroups: vi.fn(),
+  getModelAllowlistCandidates: vi.fn(),
   getProxies: vi.fn(),
   testAPIKeys: vi.fn(),
   showError: vi.fn(),
@@ -42,6 +44,7 @@ vi.mock('@/api/admin', () => ({
     },
     groups: {
       getAll: getGroups,
+      getModelAllowlistCandidates,
     },
     proxies: {
       getAll: getProxies,
@@ -76,10 +79,12 @@ vi.mock('vue-i18n', async () => {
 })
 
 const baseConfig = (): ContentModerationConfig => ({
+  engine: 'group',
+  group_id: 12,
   enabled: true,
   mode: 'pre_block',
   base_url: 'https://api.openai.com',
-  model: 'omni-moderation-latest',
+  model: 'deepseek-chat',
   proxy_id: null,
   api_key_configured: false,
   api_key_masked: '',
@@ -199,6 +204,7 @@ describe('admin RiskControlView', () => {
     getStatus.mockReset()
     listLogs.mockReset()
     getGroups.mockReset()
+    getModelAllowlistCandidates.mockReset()
     showError.mockReset()
     showSuccess.mockReset()
     testAPIKeys.mockReset()
@@ -206,7 +212,8 @@ describe('admin RiskControlView', () => {
     getConfig.mockResolvedValue(baseConfig())
     getStatus.mockResolvedValue(runtimeStatus())
     listLogs.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20, pages: 1 })
-    getGroups.mockResolvedValue([])
+    getGroups.mockResolvedValue([{ id: 12, name: '研发组', platform: 'deepseek', status: 'active' }])
+    getModelAllowlistCandidates.mockResolvedValue(['deepseek-chat'])
     getProxies.mockResolvedValue([])
     updateConfig.mockImplementation(async (payload: UpdateContentModerationConfig) => ({
       ...baseConfig(),
@@ -220,104 +227,88 @@ describe('admin RiskControlView', () => {
     }))
   })
 
-  it.each(['openai', 'typesafe'] as const)('shows the selected draft engine keys while %s remains active', async (activeEngine) => {
-    const openaiKey: ContentModerationAPIKeyStatus = {
-      index: 1, key_hash: 'openai-hash', masked: '********oa01', status: 'frozen',
-      failure_count: 1, success_count: 0, last_error: '', last_latency_ms: 100,
-      last_http_status: 429, last_tested: false, configured: true,
-    }
-    const typesafeKey: ContentModerationAPIKeyStatus = { ...openaiKey, key_hash: 'typesafe-hash', masked: '********ts02', status: 'ok', failure_count: 0, success_count: 1, last_http_status: 200 }
-    const profiles = {
-      openai: { ...baseConfig(), engine: 'openai' as const, api_key_configured: true, api_key_count: 1, api_key_statuses: [openaiKey] },
-      typesafe: { ...baseConfig(), engine: 'typesafe' as const, api_key_configured: true, api_key_count: 1, api_key_statuses: [typesafeKey] },
-    }
-    const otherEngine = activeEngine === 'openai' ? 'typesafe' : 'openai'
-    getConfig.mockResolvedValue({ ...profiles[activeEngine], engine_configs: profiles })
-    getStatus.mockResolvedValue({ ...runtimeStatus(), engine: activeEngine, api_key_statuses: profiles[activeEngine].api_key_statuses })
+  it('shows the group selector and keeps the main page mounted while settings load', async () => {
+    getGroups.mockResolvedValue([{ id: 12, name: '研发组', platform: 'deepseek', status: 'active' }])
+    const wrapper = mount(RiskControlView, { global: { stubs: { AppLayout: AppLayoutStub, BaseDialog: BaseDialogStub, Icon: true, Select: true, Toggle: true, Pagination: true, ModelWhitelistSelector: ModelWhitelistSelectorStub, ProxySelector: true } } })
+    expect(wrapper.find('[data-test="active-audit-engine"]').exists()).toBe(true)
+    await flushPromises()
+    await findButtonByText(wrapper, 'admin.riskControl.openSettings').trigger('click')
+    expect(wrapper.get('[data-test="audit-group-select"]').text()).toContain('研发组')
+    expect(wrapper.find('[data-test="audit-key-statuses"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('does not expose legacy engine or API key controls', async () => {
     const wrapper = mount(RiskControlView, { global: { stubs: { AppLayout: AppLayoutStub, BaseDialog: BaseDialogStub, Icon: true, Select: true, Toggle: true, Pagination: true, ModelWhitelistSelector: ModelWhitelistSelectorStub, ProxySelector: true } } })
     await flushPromises()
     await findButtonByText(wrapper, 'admin.riskControl.openSettings').trigger('click')
-    const engine = () => wrapper.findComponent('[data-test="audit-engine-select"]')
-    const keyPanel = () => wrapper.get('[data-test="audit-key-statuses"]')
-    expect(keyPanel().text()).toContain(profiles[activeEngine].api_key_statuses[0].masked)
-    engine().vm.$emit('update:modelValue', otherEngine)
-    await flushPromises()
-    expect(keyPanel().text()).toContain(profiles[otherEngine].api_key_statuses[0].masked)
-    expect(keyPanel().text()).not.toContain(profiles[activeEngine].api_key_statuses[0].masked)
-    expect(keyPanel().text()).toContain(otherEngine === 'openai' ? 'admin.riskControl.apiKeyStatusFrozen' : 'admin.riskControl.apiKeyStatusOk')
-    await findButtonByText(wrapper, 'admin.riskControl.refreshStatus').trigger('click')
-    await flushPromises()
-    expect(keyPanel().text()).toContain(profiles[otherEngine].api_key_statuses[0].masked)
-    expect(keyPanel().text()).not.toContain(profiles[activeEngine].api_key_statuses[0].masked)
-    engine().vm.$emit('update:modelValue', activeEngine)
-    await flushPromises()
-    expect(keyPanel().text()).toContain(profiles[activeEngine].api_key_statuses[0].masked)
-    expect(keyPanel().text()).not.toContain(profiles[otherEngine].api_key_statuses[0].masked)
+    expect(wrapper.find('[data-test="audit-engine-select"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="audit-key-statuses"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="audit-base-url"]').exists()).toBe(false)
     expect(updateConfig).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 
-  it('shows an empty key panel for an unconfigured draft engine', async () => {
-    getStatus.mockResolvedValue({ ...runtimeStatus(), api_key_statuses: [{ masked: '********oa01', configured: true, status: 'ok' }] })
+  it('saves the selected group and model', async () => {
+    getGroups.mockResolvedValue([{ id: 12, name: '研发组', platform: 'deepseek', status: 'active' }])
+    getModelAllowlistCandidates.mockResolvedValue(['deepseek-chat', 'deepseek-reasoner'])
     const wrapper = mount(RiskControlView, { global: { stubs: { AppLayout: AppLayoutStub, BaseDialog: BaseDialogStub, Icon: true, Select: true, Toggle: true, Pagination: true, ModelWhitelistSelector: ModelWhitelistSelectorStub, ProxySelector: true } } })
     await flushPromises()
     await findButtonByText(wrapper, 'admin.riskControl.openSettings').trigger('click')
-    wrapper.findComponent('[data-test="audit-engine-select"]').vm.$emit('update:modelValue', 'typesafe')
+    await wrapper.get('[data-test="audit-group-select"]').setValue('12')
     await flushPromises()
-    expect(wrapper.get('[data-test="audit-key-statuses"]').text()).toContain('admin.riskControl.apiKeyHealthEmpty')
-    expect(wrapper.get('[data-test="audit-key-statuses"]').text()).not.toContain('********oa01')
-    expect(updateConfig).not.toHaveBeenCalled()
-    wrapper.unmount()
-  })
-
-  it('preserves both engine drafts and saves thresholds independently', async () => {
-    const wrapper = mount(RiskControlView, { global: { stubs: { AppLayout: AppLayoutStub, BaseDialog: BaseDialogStub, Icon: true, Select: true, Toggle: true, Pagination: true, ModelWhitelistSelector: ModelWhitelistSelectorStub, ProxySelector: true } } })
-    await flushPromises()
-    await findButtonByText(wrapper, 'admin.riskControl.openSettings').trigger('click')
-    await wrapper.get('[data-test="audit-base-url"]').setValue('https://openai-edited.example')
-    await findButtonByText(wrapper, 'admin.riskControl.tabs.riskThresholds').trigger('click')
-    await wrapper.get('[data-test="risk-threshold-sexual"]').setValue('73')
-    await findButtonByText(wrapper, 'admin.riskControl.tabs.basic').trigger('click')
-    const engine = () => wrapper.findComponent('[data-test="audit-engine-select"]')
-    engine().vm.$emit('update:modelValue', 'typesafe')
-    await flushPromises()
-    expect((wrapper.get('[data-test="audit-model"]').element as HTMLInputElement).value).toBe('jev-latest')
-    await wrapper.get('[data-test="audit-base-url"]').setValue('https://typesafe-edited.example')
-    await findButtonByText(wrapper, 'admin.riskControl.tabs.riskThresholds').trigger('click')
-    expect((wrapper.get('[data-test="risk-threshold-sexual"]').element as HTMLInputElement).value).toBe('65')
-    await wrapper.get('[data-test="risk-threshold-sexual"]').setValue('91')
-    await findButtonByText(wrapper, 'admin.riskControl.tabs.basic').trigger('click')
-    engine().vm.$emit('update:modelValue', 'openai')
-    await flushPromises()
-    expect((wrapper.get('[data-test="audit-base-url"]').element as HTMLInputElement).value).toBe('https://openai-edited.example')
+    expect(getModelAllowlistCandidates).toHaveBeenCalledWith(12, 'deepseek')
+    expect(wrapper.get('[data-test="audit-model"]').text()).toContain('deepseek-chat')
+    await wrapper.get('[data-test="audit-model"]').setValue('deepseek-chat')
     await findButtonByText(wrapper, 'admin.riskControl.saveConfig').trigger('click')
     await flushPromises()
-    expect(updateConfig).toHaveBeenCalledWith(expect.objectContaining({ engine: 'openai', engine_configs: {
-      openai: expect.objectContaining({ base_url: 'https://openai-edited.example', thresholds: expect.objectContaining({ sexual: 0.73 }) }),
-      typesafe: expect.objectContaining({ base_url: 'https://typesafe-edited.example', thresholds: expect.objectContaining({ sexual: 0.91 }) }),
-    } }))
+    expect(updateConfig).toHaveBeenCalledWith(expect.objectContaining({ engine: 'group', engine_configs: expect.objectContaining({ group: expect.objectContaining({ group_id: 12, model: 'deepseek-chat' }) }) }))
     expect(showError).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 
-  it('tests the draft engine without switching the active engine', async () => {
-    testAPIKeys.mockResolvedValue({ items: [{ status: 'ok', configured: false }], image_count: 0 })
+  it('does not offer API key testing for group model routing', async () => {
     const wrapper = mount(RiskControlView, { global: { stubs: { AppLayout: AppLayoutStub, BaseDialog: BaseDialogStub, Icon: true, Select: true, Toggle: true, Pagination: true, ModelWhitelistSelector: ModelWhitelistSelectorStub, ProxySelector: true } } })
     await flushPromises()
     await findButtonByText(wrapper, 'admin.riskControl.openSettings').trigger('click')
-    wrapper.findComponent('[data-test="audit-engine-select"]').vm.$emit('update:modelValue', 'typesafe')
-    await flushPromises()
-    await wrapper.get('textarea[autocomplete="new-password"]').setValue('test-only-key')
-    await findButtonByText(wrapper, 'admin.riskControl.testInputApiKeys').trigger('click')
-    await flushPromises()
-    expect(testAPIKeys).toHaveBeenCalledWith(expect.objectContaining({ engine: 'typesafe', api_keys: ['test-only-key'], model: 'jev-latest', thresholds: expect.objectContaining({ sexual: 0.65 }) }))
+    expect(wrapper.find('[data-test="test-input-api-keys"]').exists()).toBe(false)
+    expect(testAPIKeys).not.toHaveBeenCalled()
     expect(updateConfig).not.toHaveBeenCalled()
     expect(wrapper.get('[data-test="active-audit-engine"]').text()).not.toContain('TypeSafe AI')
     wrapper.unmount()
   })
 
-  it.each(['openai', 'typesafe'] as const)('restores the shared defaults for %s without replacing saved thresholds on load', async (engine) => {
-    getConfig.mockResolvedValue({ ...baseConfig(), engine, thresholds: { sexual: 0.8, harassment: 0.8 } })
+  it('ignores stale log responses after a newer filter request', async () => {
+    const pending: Array<(value: { items: ContentModerationLog[]; total: number; page: number; page_size: number; pages: number }) => void> = []
+    let callCount = 0
+    listLogs.mockImplementation(() => {
+      callCount += 1
+      if (callCount === 1) return Promise.resolve({ items: [], total: 0, page: 1, page_size: 20, pages: 1 })
+      return new Promise((resolve) => pending.push(resolve))
+    })
+    const wrapper = mount(RiskControlView, { global: { stubs: { AppLayout: AppLayoutStub, BaseDialog: BaseDialogStub, Icon: true, Select: true, Toggle: true, Pagination: true, ModelWhitelistSelector: ModelWhitelistSelectorStub, ProxySelector: true } } })
+    await flushPromises()
+
+    const search = wrapper.get('input[type="search"]')
+    await search.setValue('older')
+    await search.trigger('keyup.enter')
+    await search.setValue('newer')
+    await search.trigger('keyup.enter')
+    expect(pending).toHaveLength(2)
+
+    pending[1]({ items: [{ input_excerpt: 'newer response' } as ContentModerationLog], total: 1, page: 1, page_size: 20, pages: 1 })
+    await flushPromises()
+    expect(wrapper.text()).toContain('newer response')
+
+    pending[0]({ items: [{ input_excerpt: 'older response' } as ContentModerationLog], total: 1, page: 1, page_size: 20, pages: 1 })
+    await flushPromises()
+    expect(wrapper.text()).toContain('newer response')
+    expect(wrapper.text()).not.toContain('older response')
+    wrapper.unmount()
+  })
+
+  it('restores saved thresholds without replacing them on load', async () => {
+    getConfig.mockResolvedValue({ ...baseConfig(), engine: 'group', group_id: 12, thresholds: { sexual: 0.8, harassment: 0.8 } })
     const wrapper = mount(RiskControlView, { global: { stubs: { AppLayout: AppLayoutStub, BaseDialog: BaseDialogStub, Icon: true, Select: true, Toggle: true, Pagination: true, ModelWhitelistSelector: ModelWhitelistSelectorStub, ProxySelector: true } } })
     await flushPromises()
     await findButtonByText(wrapper, 'admin.riskControl.openSettings').trigger('click')
@@ -332,7 +323,6 @@ describe('admin RiskControlView', () => {
     for (const [category, value] of Object.entries(defaults)) {
       expect((wrapper.get(`[data-test="risk-threshold-${category}"]`).element as HTMLInputElement).value).toBe(String(value))
     }
-    if (engine === 'typesafe') expect(wrapper.text()).toContain('admin.riskControl.typeSafeThresholds')
     expect(updateConfig).not.toHaveBeenCalled()
     wrapper.unmount()
   })
@@ -506,16 +496,11 @@ describe('admin RiskControlView', () => {
     expect(wrapper.text()).toContain('120')
     expect(wrapper.text()).toContain('8')
     expect(wrapper.text()).toContain('86 ms')
-    expect(wrapper.text()).toContain('admin.riskControl.preBlockAPIKeyLoad')
-    expect(wrapper.text()).toContain('sk-...one')
-    expect(wrapper.text()).toContain('sk-...two')
-    expect(wrapper.text()).toContain('72')
-    expect(wrapper.text()).toContain('56')
-    expect(wrapper.text()).toContain('同步并发 2 / 可用 Key 2，累计 128 次，worker：3 / 7')
+    expect(wrapper.text()).not.toContain('admin.riskControl.preBlockAPIKeyLoad')
+    expect(wrapper.find('[data-test="pre-block-api-key-load-card"]').exists()).toBe(false)
 
     const runtimeCards = wrapper.get('[data-test="pre-block-runtime-cards"]')
     const syncCard = wrapper.get('[data-test="pre-block-sync-card"]')
-    const apiKeyLoadCard = wrapper.get('[data-test="pre-block-api-key-load-card"]')
 
     expect(runtimeCards.classes()).toEqual(expect.arrayContaining([
       'grid',
@@ -523,16 +508,8 @@ describe('admin RiskControlView', () => {
       'xl:grid-cols-[minmax(0,520px)_minmax(0,1fr)]',
     ]))
     expect(syncCard.element.parentElement).toBe(runtimeCards.element)
-    expect(apiKeyLoadCard.element.parentElement).toBe(runtimeCards.element)
     expect(syncCard.classes()).toContain('card')
-    expect(apiKeyLoadCard.classes()).toContain('card')
     expect(syncCard.get('h2').text()).toBe('admin.riskControl.preBlockSyncStatus')
     expect(syncCard.text()).toContain('admin.riskControl.preBlockSyncHint')
-    expect(apiKeyLoadCard.get('h2').text()).toBe('admin.riskControl.preBlockAPIKeyLoad')
-    expect(apiKeyLoadCard.text()).toContain('admin.riskControl.preBlockAPIKeyLoadHint')
-    expect(wrapper.get('[data-test="pre-block-api-key-load-list"]').classes()).toEqual(expect.arrayContaining([
-      'max-h-[280px]',
-      'overflow-y-auto',
-    ]))
   })
 })

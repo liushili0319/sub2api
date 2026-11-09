@@ -1,11 +1,10 @@
 <template>
   <AppLayout>
-    <div class="space-y-6">
-      <div v-if="loading" class="flex items-center justify-center py-16">
-        <div class="h-8 w-8 animate-spin rounded-full border-b-2 border-primary-600"></div>
+    <div class="relative space-y-6">
+      <div v-if="loading" class="pointer-events-none absolute right-0 top-0 z-10 inline-flex items-center gap-2 rounded-md bg-white/90 px-3 py-2 text-xs text-gray-500 shadow-sm dark:bg-dark-800/90 dark:text-dark-300" role="status">
+        <span class="h-3 w-3 animate-spin rounded-full border-2 border-gray-300 border-t-primary-600" aria-hidden="true"></span>
+        {{ t('common.loading') }}
       </div>
-
-      <template v-else>
         <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <h1 class="text-2xl font-semibold text-gray-900 dark:text-white">{{ t('admin.riskControl.title') }}</h1>
@@ -92,7 +91,7 @@
             </div>
           </div>
 
-          <div data-test="pre-block-api-key-load-card" class="card">
+          <div v-if="configForm.engine !== 'group'" data-test="pre-block-api-key-load-card" class="card">
             <div class="flex flex-col gap-4 border-b border-gray-100 px-6 py-4 dark:border-dark-700 lg:flex-row lg:items-center lg:justify-between">
               <div>
                 <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('admin.riskControl.preBlockAPIKeyLoad') }}</h2>
@@ -377,8 +376,6 @@
             @update:pageSize="onPageSizeChange"
           />
         </div>
-      </template>
-
       <BaseDialog :show="settingsOpen" :title="t('admin.riskControl.settingsTitle')" width="extra-wide" @close="settingsOpen = false">
         <div class="space-y-6">
           <div class="flex gap-2 overflow-x-auto border-b border-gray-100 pb-3 dark:border-dark-700">
@@ -399,7 +396,7 @@
               <div class="flex items-center justify-between rounded-lg border border-gray-100 p-4 dark:border-dark-700">
                 <div>
                   <p class="text-sm font-medium text-gray-900 dark:text-white">{{ t('admin.riskControl.enabled') }}</p>
-                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.enabledHint') }}</p>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.enabledHint') }}</p>
                 </div>
                 <Toggle v-model="configForm.enabled" />
               </div>
@@ -408,20 +405,24 @@
                 <Select v-model="configForm.mode" :options="modeOptions" />
                 <p class="mt-2 text-xs leading-5 text-gray-500 dark:text-gray-400">{{ modeDescription(configForm.mode) }}</p>
               </div>
-              <div>
-                <label class="input-label">{{ t('admin.riskControl.engine') }}</label>
-                <Select data-test="audit-engine-select" :model-value="configForm.engine" :options="engineOptions" :disabled="apiKeyTesting || saving" @update:model-value="switchEngine" />
+              <div class="lg:col-span-2">
+                <label class="input-label">{{ t('admin.riskControl.groupModelGroup') }}</label>
+                <select v-model.number="configForm.group_id" data-test="audit-group-select" class="input" @change="onAuditGroupChange">
+                  <option :value="null">{{ t('admin.riskControl.groupModelGroupPlaceholder') }}</option>
+                  <option v-for="group in auditGroups" :key="group.id" :value="group.id">{{ group.name }} · {{ group.platform }}</option>
+                </select>
               </div>
-              <div v-if="configForm.engine === 'typesafe'" class="lg:col-span-2 text-sm text-amber-700 dark:text-amber-300" role="status">
-                {{ t('admin.riskControl.typeSafeNotice') }}
+              <div class="lg:col-span-2 text-sm text-amber-700 dark:text-amber-300" role="status">
+                {{ t('admin.riskControl.groupEngineNotice') }}
               </div>
-              <div>
-                <label class="input-label">{{ t('admin.riskControl.baseUrl') }}</label>
-                <input v-model.trim="configForm.base_url" data-test="audit-base-url" type="url" class="input" :placeholder="configForm.engine === 'typesafe' ? 'https://api.typesafe.ai' : 'https://api.openai.com'" />
-              </div>
+              <div class="lg:col-span-2 input-hint">{{ t('admin.riskControl.groupModelRouteHint') }}</div>
               <div>
                 <label class="input-label">{{ t('admin.riskControl.model') }}</label>
-                <input v-model.trim="configForm.model" data-test="audit-model" type="text" class="input" :placeholder="configForm.engine === 'typesafe' ? 'jev-latest' : 'omni-moderation-latest'" />
+                <select v-model="configForm.model" data-test="audit-model" class="input" :disabled="auditModelsLoading || !configForm.group_id">
+                  <option value="">{{ auditModelsLoading ? t('common.loading') : t('admin.riskControl.groupModelModelPlaceholder') }}</option>
+                  <option v-for="model in auditModels" :key="model" :value="model">{{ model }}</option>
+                </select>
+                <p v-if="auditModelsLoading" class="mt-2 text-xs text-gray-500 dark:text-gray-400" role="status">{{ t('common.loading') }}</p>
               </div>
               <div>
                 <label class="input-label">{{ t('admin.riskControl.timeoutMs') }}</label>
@@ -438,14 +439,14 @@
                   <span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-400">%</span>
                 </div>
               </div>
-              <div>
+              <div v-if="configForm.engine !== 'group'">
                 <label class="input-label">{{ t('admin.riskControl.proxy') }}</label>
                 <ProxySelector v-model="configForm.proxy_id" :proxies="proxies" />
                 <p class="mt-2 text-xs leading-5 text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.proxyHint') }}</p>
               </div>
             </div>
 
-            <div class="overflow-hidden rounded-xl border border-gray-100 bg-white shadow-sm dark:border-dark-700 dark:bg-dark-800">
+            <div v-if="configForm.engine !== 'group'" class="overflow-hidden rounded-xl border border-gray-100 bg-white shadow-sm dark:border-dark-700 dark:bg-dark-800">
               <div class="flex flex-col gap-4 border-b border-gray-100 bg-gray-50 px-4 py-4 dark:border-dark-700 dark:bg-dark-800/60 lg:flex-row lg:items-center lg:justify-between">
                 <div class="flex items-start gap-3">
                   <span class="mt-0.5 flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-primary-50 text-primary-600 dark:bg-primary-900/30 dark:text-primary-300">
@@ -1241,6 +1242,8 @@ const activeSettingsTab = ref<SettingsTab>('basic')
 const groupSearch = ref('')
 const flaggedHashInput = ref('')
 const groups = ref<AdminGroup[]>([])
+const auditModels = ref<string[]>([])
+const auditModelsLoading = ref(false)
 const proxies = ref<Proxy[]>([])
 const logs = ref<ContentModerationLog[]>([])
 const status = ref<ContentModerationRuntimeStatus | null>(null)
@@ -1251,13 +1254,15 @@ const moderationTestPrompt = ref('')
 const moderationTestImages = ref<string[]>([])
 const moderationTestResult = ref<ContentModerationTestAuditResult | null>(null)
 const inputDetailRow = ref<ContentModerationLog | null>(null)
-const savedEngine = ref<ModerationEngine>('openai')
-const engineOptions: SelectOption[] = [{ value: 'openai', label: 'OpenAI' }, { value: 'typesafe', label: 'TypeSafe AI' }]
-const engineLabel = (engine: ModerationEngine) => engine === 'typesafe' ? 'TypeSafe AI' : 'OpenAI'
+const savedEngine = ref<ModerationEngine>('group')
+const engineLabel = (_engine: ModerationEngine) => '分组模型'
+let auditModelsRequestID = 0
+let logsRequestID = 0
 let statusTimer: number | null = null
 
 const configForm = reactive({
-  engine: 'openai' as ModerationEngine,
+  engine: 'group' as ModerationEngine,
+  group_id: null as number | null,
   enabled: false,
   mode: 'pre_block' as ModerationMode,
   base_url: 'https://api.openai.com',
@@ -1296,7 +1301,7 @@ const configForm = reactive({
   model_filter_models: [] as string[],
 })
 
-const engineFields = ['base_url', 'model', 'proxy_id', 'api_keys_text', 'api_key_configured', 'api_key_masked', 'api_key_count', 'api_key_masks', 'api_key_statuses', 'api_keys_mode', 'clear_api_key', 'timeout_ms', 'retry_count', 'thresholds'] as const
+const engineFields = ['group_id', 'base_url', 'model', 'proxy_id', 'api_keys_text', 'api_key_configured', 'api_key_masked', 'api_key_count', 'api_key_masks', 'api_key_statuses', 'api_keys_mode', 'clear_api_key', 'timeout_ms', 'retry_count', 'thresholds'] as const
 type EngineDraft = Pick<typeof configForm, typeof engineFields[number]> & { pendingDeletes: string[] }
 const engineDrafts = ref<Partial<Record<ModerationEngine, EngineDraft>>>({})
 
@@ -1304,24 +1309,11 @@ function captureEngineDraft(): EngineDraft {
   return structuredClone({ ...Object.fromEntries(engineFields.map(key => [key, toRaw(configForm)[key]])), pendingDeletes: [...pendingDeleteApiKeyHashes.value] }) as EngineDraft
 }
 
-function switchEngine(value: string | number | boolean | null) {
-  if ((value !== 'openai' && value !== 'typesafe') || apiKeyTesting.value || saving.value) return
-  engineDrafts.value[configForm.engine] = captureEngineDraft()
-  configForm.engine = value
-  const draft = engineDrafts.value[value]
-  if (draft) {
-    const { pendingDeletes, ...fields } = structuredClone(toRaw(draft))
-    Object.assign(configForm, fields)
-    pendingDeleteApiKeyHashes.value = pendingDeletes
-  }
-  testedApiKeyStatuses.value = []
-  moderationTestResult.value = null
-}
-
 function engineDraftFromConfig(config: ContentModerationConfig | undefined, engine: ModerationEngine): EngineDraft {
   return {
-    base_url: config?.base_url || (engine === 'typesafe' ? 'https://api.typesafe.ai' : 'https://api.openai.com'),
-    model: config?.model || (engine === 'typesafe' ? 'jev-latest' : 'omni-moderation-latest'),
+    group_id: config?.group_id ?? null,
+    base_url: config?.base_url || (engine === 'typesafe' ? 'https://api.typesafe.ai' : engine === 'group' ? 'http://127.0.0.1:3000' : 'https://api.openai.com'),
+    model: config?.model || (engine === 'typesafe' ? 'jev-latest' : engine === 'group' ? 'deepseek-chat' : 'omni-moderation-latest'),
     proxy_id: config?.proxy_id ?? null, api_keys_text: '', api_key_configured: config?.api_key_configured ?? false,
     api_key_masked: config?.api_key_masked ?? '', api_key_count: config?.api_key_count ?? 0,
     api_key_masks: [...(config?.api_key_masks ?? [])], api_key_statuses: [...(config?.api_key_statuses ?? [])],
@@ -1335,6 +1327,7 @@ function engineDraftPayload(draft: EngineDraft): UpdateModerationEngineConfig {
   const keys = parseApiKeys(draft.api_keys_text)
   if (!draft.clear_api_key && draft.api_keys_mode === 'replace' && keys.length === 0) throw new Error('empty replacement keys')
   return {
+    group_id: draft.group_id ?? undefined,
     base_url: draft.base_url, model: draft.model, proxy_id: draft.proxy_id ?? 0,
     timeout_ms: draft.timeout_ms, retry_count: draft.retry_count,
     thresholds: Object.fromEntries(riskThresholdCategories.map(k => [k, clampPercent(draft.thresholds[k]) / 100])),
@@ -1491,6 +1484,11 @@ const groupFilterOptions = computed<SelectOption[]>(() => [
   })),
 ])
 
+const auditGroups = computed(() => groups.value.filter((group) => (
+  group.status === 'active' &&
+  ['openai', 'deepseek', 'kimi', 'zhipu', 'minimax'].includes(group.platform)
+)))
+
 const selectedGroupCount = computed(() => String(configForm.group_ids.length))
 
 const modelFilterModelCount = computed(() => configForm.model_filter_models.length)
@@ -1572,34 +1570,9 @@ const hiddenApiKeyRowCount = computed<number>(() => Math.max(0, apiKeyRows.value
 
 const canToggleApiKeyRows = computed<boolean>(() => apiKeyRows.value.length > maxVisibleApiKeyRows)
 
-const activeSavedApiKeyRows = computed<ContentModerationAPIKeyStatus[]>(() => (
-  savedApiKeyRows.value.filter((row) => !isStoredApiKeyPendingDelete(row))
-))
-
-const apiKeyHealthBadges = computed<Array<{ status: ContentModerationAPIKeyStatus['status']; count: number }>>(() => {
-  const counts: Record<ContentModerationAPIKeyStatus['status'], number> = {
-    ok: 0,
-    error: 0,
-    frozen: 0,
-    unknown: 0,
-  }
-  for (const row of activeSavedApiKeyRows.value) {
-    counts[row.status] = (counts[row.status] ?? 0) + 1
-  }
-  if (activeSavedApiKeyRows.value.length === 0 && effectiveStoredApiKeyCount.value > 0) {
-    counts.unknown = effectiveStoredApiKeyCount.value
-  }
-  return (['ok', 'frozen', 'error', 'unknown'] as Array<ContentModerationAPIKeyStatus['status']>)
-    .map((item) => ({ status: item, count: counts[item] }))
-    .filter((item) => item.count > 0)
-})
-
-const apiKeyHealthSummary = computed(() => {
-  if (!configForm.api_key_configured) return ''
-  if (apiKeyHealthBadges.value.length === 0) return t('admin.riskControl.apiKeyStatusUnknown')
-  return apiKeyHealthBadges.value
-    .map((badge) => `${apiKeyStatusLabel(badge.status)} ${badge.count}`)
-    .join(' · ')
+const selectedAuditGroupName = computed(() => {
+  const group = groups.value.find((item) => item.id === configForm.group_id)
+  return group?.name || (configForm.group_id ? `#${configForm.group_id}` : t('admin.riskControl.groupModelGroupPlaceholder'))
 })
 
 const overviewItems = computed<OverviewItem[]>(() => [
@@ -1617,9 +1590,9 @@ const overviewItems = computed<OverviewItem[]>(() => [
   },
   {
     key: 'api-key',
-    label: t('admin.riskControl.overview.apiKey'),
-    value: configForm.api_key_configured ? t('admin.riskControl.apiKeyCount', { count: configForm.api_key_count }) : t('admin.riskControl.notConfigured'),
-    meta: configForm.api_key_configured ? apiKeyHealthSummary.value || configForm.model || '-' : configForm.model || '-',
+    label: configForm.engine === 'group' ? t('admin.riskControl.groupModelGroup') : t('admin.riskControl.overview.apiKey'),
+    value: configForm.engine === 'group' ? selectedAuditGroupName.value : configForm.api_key_configured ? t('admin.riskControl.apiKeyCount', { count: configForm.api_key_count }) : t('admin.riskControl.notConfigured'),
+    meta: configForm.model || '-',
     icon: 'key',
     iconClass: 'bg-sky-50 text-sky-600 dark:bg-sky-900/20 dark:text-sky-300',
   },
@@ -1780,12 +1753,13 @@ const runtimeBadgeClass = computed(() => {
 })
 
 function applyConfig(config: ContentModerationConfig) {
-  savedEngine.value = config.engine ?? 'openai'
+  savedEngine.value = 'group'
   configForm.engine = savedEngine.value
   configForm.enabled = config.enabled
   configForm.mode = config.mode
   configForm.base_url = config.base_url || 'https://api.openai.com'
   configForm.model = config.model || 'omni-moderation-latest'
+  configForm.group_id = config.engine_configs?.group?.group_id ?? config.group_id ?? null
   configForm.proxy_id = config.proxy_id || null
   configForm.api_keys_text = ''
   configForm.api_key_configured = config.api_key_configured
@@ -1823,12 +1797,49 @@ function applyConfig(config: ContentModerationConfig) {
   configForm.model_filter_type = modelFilter.type
   configForm.model_filter_models = modelFilter.models
   engineDrafts.value = {
-    openai: engineDraftFromConfig(config.engine_configs?.openai ?? (savedEngine.value === 'openai' ? config : undefined), 'openai'),
-    typesafe: engineDraftFromConfig(config.engine_configs?.typesafe ?? (savedEngine.value === 'typesafe' ? config : undefined), 'typesafe'),
+    group: engineDraftFromConfig(config.engine_configs?.group ?? (config.engine === 'group' ? config : undefined), 'group'),
   }
   const { pendingDeletes, ...fields } = structuredClone(toRaw(engineDrafts.value[configForm.engine]!))
   Object.assign(configForm, fields)
   pendingDeleteApiKeyHashes.value = [...pendingDeletes]
+}
+
+async function loadAuditModels(groupID: number | null, preserveModel: boolean) {
+  const requestID = ++auditModelsRequestID
+  const currentModel = preserveModel ? configForm.model.trim() : ''
+  auditModels.value = []
+  auditModelsLoading.value = Boolean(groupID)
+  if (!groupID) {
+    configForm.model = ''
+    return
+  }
+  const group = auditGroups.value.find((item) => item.id === groupID)
+  if (!group) {
+    configForm.model = ''
+    auditModelsLoading.value = false
+    return
+  }
+  try {
+    const models = await adminAPI.groups.getModelAllowlistCandidates(group.id, group.platform)
+    if (requestID !== auditModelsRequestID) return
+    const candidates = normalizeModelNames(models)
+    auditModels.value = candidates
+    configForm.model = candidates.find((model) => model.toLowerCase() === currentModel.toLowerCase()) ?? candidates[0] ?? ''
+  } catch (err: unknown) {
+    if (requestID === auditModelsRequestID) {
+      auditModels.value = currentModel ? [currentModel] : []
+      configForm.model = currentModel
+      appStore.showError(extractApiErrorMessage(err, t('admin.riskControl.groupModelModelsLoadFailed')))
+    }
+  } finally {
+    if (requestID === auditModelsRequestID) {
+      auditModelsLoading.value = false
+    }
+  }
+}
+
+function onAuditGroupChange() {
+  void loadAuditModels(configForm.group_id, false)
 }
 
 async function loadAll() {
@@ -1845,6 +1856,7 @@ async function loadAll() {
     groups.value = groupItems
     status.value = runtimeStatus
     proxies.value = proxyItems
+    await loadAuditModels(configForm.group_id, true)
     if ((runtimeStatus.engine ?? 'openai') === configForm.engine && Array.isArray(runtimeStatus.api_key_statuses)) {
       configForm.api_key_statuses = [...runtimeStatus.api_key_statuses]
       prunePendingDeleteAPIKeyHashes()
@@ -1878,6 +1890,14 @@ async function loadStatus(silent = true) {
 async function saveConfig() {
   saving.value = true
   try {
+    if (!configForm.group_id) {
+      appStore.showError(t('admin.riskControl.groupModelGroupRequired'))
+      return
+    }
+    if (!configForm.model.trim()) {
+      appStore.showError(t('admin.riskControl.groupModelModelRequired'))
+      return
+    }
     const modelFilterPayload = buildModelFilterPayload()
     if (modelFilterPayload.type !== 'all' && modelFilterPayload.models.length === 0) {
       appStore.showError(t('admin.riskControl.modelFilterModelsRequired'))
@@ -1885,6 +1905,7 @@ async function saveConfig() {
     }
     const payload: UpdateContentModerationConfig = {
       engine: configForm.engine,
+      group_id: configForm.group_id,
       enabled: configForm.enabled,
       mode: configForm.mode,
       base_url: configForm.base_url,
@@ -1929,8 +1950,8 @@ async function saveConfig() {
       payload.delete_api_key_hashes = [...pendingDeleteApiKeyHashes.value]
     }
 
-    engineDrafts.value[configForm.engine] = captureEngineDraft()
-    payload.engine_configs = Object.fromEntries(Object.entries(engineDrafts.value).map(([engine, draft]) => [engine, engineDraftPayload(draft)]))
+    engineDrafts.value.group = captureEngineDraft()
+    payload.engine_configs = { group: engineDraftPayload(engineDrafts.value.group) }
     const updated = await adminAPI.riskControl.updateConfig(payload)
     applyConfig(updated)
     settingsOpen.value = false
@@ -1944,6 +1965,7 @@ async function saveConfig() {
 }
 
 async function loadLogs() {
+  const requestID = ++logsRequestID
   logsLoading.value = true
   try {
     const params = {
@@ -1957,15 +1979,20 @@ async function loadLogs() {
       to: normalizeDateTimeLocal(filters.to),
     }
     const result = await adminAPI.riskControl.listLogs(params)
+    if (requestID !== logsRequestID) return
     logs.value = result.items
     pagination.total = result.total
     pagination.page = result.page
     pagination.page_size = result.page_size
     pagination.pages = result.pages
   } catch (err: unknown) {
-    appStore.showError(extractApiErrorMessage(err, t('admin.riskControl.logsFailed')))
+    if (requestID === logsRequestID) {
+      appStore.showError(extractApiErrorMessage(err, t('admin.riskControl.logsFailed')))
+    }
   } finally {
-    logsLoading.value = false
+    if (requestID === logsRequestID) {
+      logsLoading.value = false
+    }
   }
 }
 

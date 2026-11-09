@@ -64,6 +64,8 @@ type StorageEndpoint struct {
 }
 
 type storageConfig struct {
+	ScannerMode            string            `json:"scanner_mode"`
+	CustomRules            string            `json:"custom_rules"`
 	Enabled                bool              `json:"enabled"`
 	BlockingEnabled        bool              `json:"blocking_enabled"`
 	BlockingLatestTurnOnly bool              `json:"blocking_latest_turn_only"`
@@ -82,15 +84,17 @@ type storageConfig struct {
 }
 
 type ActiveEndpoint struct {
-	ID         string
-	Name       string
-	Protocol   string
-	BaseURL    string
-	Model      string
-	Token      string
-	TimeoutMS  int
-	InputLimit int
-	Enabled    bool
+	ScannerMode string
+	CustomRules string
+	ID          string
+	Name        string
+	Protocol    string
+	BaseURL     string
+	Model       string
+	Token       string
+	TimeoutMS   int
+	InputLimit  int
+	Enabled     bool
 	// TokenInvalid marks an endpoint whose persisted token ciphertext cannot be
 	// decrypted with the current encryption key (key changed or auto-generated
 	// on restart). The endpoint is kept visible for admins but excluded from
@@ -99,6 +103,8 @@ type ActiveEndpoint struct {
 }
 
 type ActiveConfig struct {
+	ScannerMode            string
+	CustomRules            string
 	RiskControlEnabled     bool
 	Enabled                bool
 	BlockingEnabled        bool
@@ -131,6 +137,8 @@ type PublicEndpoint struct {
 }
 
 type PublicConfig struct {
+	ScannerMode            string           `json:"scanner_mode"`
+	CustomRules            string           `json:"custom_rules"`
 	Enabled                bool             `json:"enabled"`
 	BlockingEnabled        bool             `json:"blocking_enabled"`
 	BlockingLatestTurnOnly bool             `json:"blocking_latest_turn_only"`
@@ -163,6 +171,8 @@ type UpdateEndpoint struct {
 }
 
 type UpdateConfigRequest struct {
+	ScannerMode            *string          `json:"scanner_mode"`
+	CustomRules            *string          `json:"custom_rules"`
 	ExpectedConfigVersion  int64            `json:"expected_config_version" binding:"required"`
 	Enabled                bool             `json:"enabled"`
 	BlockingEnabled        bool             `json:"blocking_enabled"`
@@ -179,6 +189,7 @@ type UpdateConfigRequest struct {
 
 func DefaultStorageConfig() storageConfig {
 	return storageConfig{
+		ScannerMode:            "qwen3guard",
 		Enabled:                false,
 		BlockingEnabled:        false,
 		BlockingLatestTurnOnly: false,
@@ -216,6 +227,10 @@ func normalizeStorageConfig(cfg *storageConfig) {
 	if cfg.ConfigVersion < 1 {
 		cfg.ConfigVersion = 1
 	}
+	if cfg.ScannerMode == "" {
+		cfg.ScannerMode = "qwen3guard"
+	}
+	cfg.CustomRules = strings.TrimSpace(cfg.CustomRules)
 	if strings.TrimSpace(cfg.Strategy) == "" {
 		cfg.Strategy = "priority"
 	}
@@ -255,6 +270,15 @@ func normalizeStorageConfig(cfg *storageConfig) {
 }
 
 func validateStorageConfig(cfg storageConfig) error {
+	if cfg.ScannerMode != "" && cfg.ScannerMode != "qwen3guard" && cfg.ScannerMode != "custom_policy" {
+		return infraerrors.BadRequest("prompt_audit_invalid_scanner_mode", "审计模型模式无效")
+	}
+	if len([]rune(cfg.CustomRules)) > 4000 {
+		return infraerrors.BadRequest("prompt_audit_custom_rules_too_long", "自定义规则不能超过 4000 个字符")
+	}
+	if cfg.Enabled && cfg.ScannerMode == "custom_policy" && strings.TrimSpace(cfg.CustomRules) == "" {
+		return infraerrors.BadRequest("prompt_audit_custom_rules_required", "请填写自定义审计规则")
+	}
 	if cfg.BlockingEnabled && !cfg.Enabled {
 		return infraerrors.BadRequest(ErrorCodeRequiresEnabled, "开启同步阻止前必须先启用提示词审计")
 	}
@@ -369,6 +393,8 @@ func (cfg ActiveConfig) EnabledEndpoints() []ActiveEndpoint {
 	result := make([]ActiveEndpoint, 0, len(cfg.Endpoints))
 	for _, ep := range cfg.Endpoints {
 		if ep.Enabled {
+			ep.ScannerMode = cfg.ScannerMode
+			ep.CustomRules = cfg.CustomRules
 			result = append(result, ep)
 		}
 	}
@@ -412,6 +438,7 @@ func PublicFromStorage(cfg storageConfig, riskControlEnabled bool, invalidTokenE
 	}
 	active := ActiveConfig{RiskControlEnabled: riskControlEnabled, Enabled: cfg.Enabled, BlockingEnabled: cfg.BlockingEnabled}
 	return PublicConfig{
+		ScannerMode: cfg.ScannerMode, CustomRules: cfg.CustomRules,
 		Enabled: cfg.Enabled, BlockingEnabled: cfg.BlockingEnabled, BlockingLatestTurnOnly: cfg.BlockingLatestTurnOnly, StorePassEvents: cfg.StorePassEvents,
 		EffectiveMode: active.EffectiveMode(), Strategy: cfg.Strategy, WorkerCount: cfg.WorkerCount,
 		QueueCapacity: cfg.QueueCapacity, Scanners: scanners, AllGroups: cfg.AllGroups,
@@ -422,6 +449,7 @@ func PublicFromStorage(cfg storageConfig, riskControlEnabled bool, invalidTokenE
 
 func ActiveFromStorage(cfg storageConfig, riskControlEnabled bool, encryptor SecretEncryptor) (ActiveConfig, error) {
 	active := ActiveConfig{
+		ScannerMode: cfg.ScannerMode, CustomRules: cfg.CustomRules,
 		RiskControlEnabled: riskControlEnabled, Enabled: cfg.Enabled, BlockingEnabled: cfg.BlockingEnabled,
 		BlockingLatestTurnOnly: cfg.BlockingLatestTurnOnly,
 		StorePassEvents:        cfg.StorePassEvents, Strategy: cfg.Strategy, WorkerCount: cfg.WorkerCount,

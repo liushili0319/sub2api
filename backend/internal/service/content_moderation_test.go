@@ -1412,7 +1412,7 @@ func TestContentModerationTestAPIKeys_400DoesNotFreezeAPIKey(t *testing.T) {
 	require.Nil(t, result.Items[0].FrozenUntil)
 }
 
-func TestContentModerationCheck_PreHashUsesRedisHashCache(t *testing.T) {
+func TestContentModerationCheck_PreHashBlocksWithoutWritingRetryAuditLog(t *testing.T) {
 	cfg := defaultContentModerationConfig()
 	cfg.Enabled = true
 	cfg.PreHashCheckEnabled = true
@@ -1458,13 +1458,7 @@ func TestContentModerationCheck_PreHashUsesRedisHashCache(t *testing.T) {
 	require.Contains(t, decision.Message, "命中历史风险输入")
 	require.Contains(t, decision.Message, content.Hash())
 	require.Len(t, hashCache.snapshotChecked(), 1)
-	logs := requireContentModerationLogCount(t, repo, 1)
-	require.True(t, logs[0].Flagged)
-	require.Equal(t, ContentModerationActionHashBlock, logs[0].Action)
-	require.Equal(t, 1.0, logs[0].CategoryScores["hash"])
-	require.Equal(t, ContentModerationModePreBlock, logs[0].Mode)
-	require.Zero(t, logs[0].ViolationCount)
-	require.False(t, logs[0].AutoBanned)
+	requireContentModerationLogCount(t, repo, 0)
 	require.Empty(t, userRepo.updated)
 }
 
@@ -1615,7 +1609,7 @@ func newContentModerationFlaggedLog(userID int64) *ContentModerationLog {
 	}
 }
 
-func TestContentModerationCheck_PreBlockFlaggedWritesRedisHashCache(t *testing.T) {
+func TestContentModerationCheck_PreBlockFlaggedHashDoesNotDuplicateAuditRecordOnRetry(t *testing.T) {
 	requestCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestCount++
@@ -1675,9 +1669,8 @@ func TestContentModerationCheck_PreBlockFlaggedWritesRedisHashCache(t *testing.T
 	require.Equal(t, ContentModerationActionHashBlock, decision.Action)
 	require.Equal(t, recorded[0], decision.InputHash)
 	require.Equal(t, 1, requestCount)
-	logs := requireContentModerationLogCount(t, repo, 2)
+	logs := requireContentModerationLogCount(t, repo, 1)
 	require.Equal(t, ContentModerationActionBlock, logs[0].Action)
-	require.Equal(t, ContentModerationActionHashBlock, logs[1].Action)
 }
 
 func TestContentModerationDeleteFlaggedInputHash_NormalizesAndDeletes(t *testing.T) {

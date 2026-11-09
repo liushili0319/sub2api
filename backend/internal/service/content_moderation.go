@@ -142,6 +142,7 @@ func ContentModerationCategories() []string {
 type ContentModerationConfig struct {
 	Engine   string                         `json:"engine,omitempty"`
 	TypeSafe *ContentModerationEngineConfig `json:"typesafe,omitempty"`
+	GroupID  *int64                         `json:"group_id,omitempty"`
 	Enabled  bool                           `json:"enabled"`
 	Mode     string                         `json:"mode"`
 	BaseURL  string                         `json:"base_url"`
@@ -180,6 +181,7 @@ type ContentModerationConfig struct {
 type ContentModerationConfigView struct {
 	Engine                         string                                  `json:"engine"`
 	EngineConfigs                  map[string]*ContentModerationConfigView `json:"engine_configs,omitempty"`
+	GroupID                        *int64                                  `json:"group_id"`
 	Enabled                        bool                                    `json:"enabled"`
 	Mode                           string                                  `json:"mode"`
 	BaseURL                        string                                  `json:"base_url"`
@@ -276,6 +278,7 @@ type ContentModerationTestAuditResult struct {
 type UpdateContentModerationConfigInput struct {
 	Engine        *string                                       `json:"engine"`
 	EngineConfigs map[string]UpdateContentModerationEngineInput `json:"engine_configs"`
+	GroupID       *int64                                        `json:"group_id"`
 	Enabled       *bool                                         `json:"enabled"`
 	Mode          *string                                       `json:"mode"`
 	BaseURL       *string                                       `json:"base_url"`
@@ -510,6 +513,10 @@ type ContentModerationHashCache interface {
 	CountFlaggedInputHashes(ctx context.Context) (int64, error)
 }
 
+type ContentModerationGroupCaller interface {
+	AuditChat(ctx context.Context, groupID int64, model, text string) (string, error)
+}
+
 type ContentModerationService struct {
 	settingRepo              SettingRepository
 	repo                     ContentModerationRepository
@@ -519,6 +526,7 @@ type ContentModerationService struct {
 	proxyRepo                ProxyRepository
 	authCacheInvalidator     APIKeyAuthCacheInvalidator
 	emailService             *EmailService
+	groupCaller              ContentModerationGroupCaller
 	httpClient               *http.Client
 	moderationProxyCache     atomic.Pointer[moderationProxyURLCacheEntry]
 	asyncQueue               chan contentModerationTask
@@ -544,6 +552,10 @@ type ContentModerationService struct {
 	runtimeRefreshRetryAt    atomic.Int64
 	keyHealthMu              sync.Mutex
 	keyHealth                map[string]*contentModerationKeyHealth
+}
+
+func (s *ContentModerationService) SetGroupCaller(caller ContentModerationGroupCaller) {
+	s.groupCaller = caller
 }
 
 type contentModerationRuntimeSnapshot struct {
@@ -701,7 +713,7 @@ func (s *ContentModerationService) UpdateConfig(ctx context.Context, input Updat
 	}
 	// Legacy flat updates target the selected engine; explicit profiles preserve both drafts.
 	if err := s.updateEngineProfile(ctx, cfg, cfg.Engine, UpdateContentModerationEngineInput{
-		BaseURL: input.BaseURL, Model: input.Model, ProxyID: input.ProxyID, APIKey: input.APIKey,
+		GroupID: input.GroupID, BaseURL: input.BaseURL, Model: input.Model, ProxyID: input.ProxyID, APIKey: input.APIKey,
 		APIKeys: input.APIKeys, APIKeysMode: input.APIKeysMode, DeleteAPIKeyHashes: input.DeleteAPIKeyHashes,
 		ClearAPIKey: input.ClearAPIKey, TimeoutMS: input.TimeoutMS, RetryCount: input.RetryCount, Thresholds: input.Thresholds,
 	}); err != nil {
@@ -994,7 +1006,11 @@ func (s *ContentModerationService) Check(ctx context.Context, input ContentModer
 		"text_runes", len([]rune(content.Text)),
 		"image_count", len(content.Images))
 	hashText := content.Hash()
-	if cfg.PreHashCheckEnabled && s.hashCache != nil {
+	// A synchronous pre-block hit must remain blocked when an agent retries the
+	// same logical request. Group based audits are model decisions and may vary
+	// between accounts, so their flagged hashes are always checked on the next
+	// request even when the optional async hash setting is disabled.
+	if (cfg.PreHashCheckEnabled || (cfg.Engine == ContentModerationEngineGroup && cfg.Mode == ContentModerationModePreBlock)) && s.hashCache != nil {
 		matched, err := s.hashCache.HasFlaggedInputHash(ctx, hashText)
 		if err != nil {
 			slog.Warn("content_moderation.hash_check_failed", "user_id", input.UserID, "endpoint", input.Endpoint, "error", err)
@@ -1018,9 +1034,6 @@ func (s *ContentModerationService) Check(ctx context.Context, input ContentModer
 			if message != "" {
 				message = fmt.Sprintf("%s（hash: %s）", message, hashText)
 			}
-			scores := map[string]float64{"hash": 1.0}
-			log := s.buildLog(input, cfg, ContentModerationActionHashBlock, true, "hash", 1.0, scores, content.ExcerptText(), nil, nil, "")
-			s.enqueueRecord(input, cfg, log, hashText, false, false)
 			return &ContentModerationDecision{
 				Allowed:    false,
 				Blocked:    true,
@@ -1045,7 +1058,7 @@ func (s *ContentModerationService) Check(ctx context.Context, input ContentModer
 			"sample_rate", cfg.SampleRate)
 		return allow, nil
 	}
-	if len(cfg.apiKeys()) == 0 {
+	if cfg.Engine != ContentModerationEngineGroup && len(cfg.apiKeys()) == 0 {
 		if cfg.Mode == ContentModerationModePreBlock {
 			s.recordPreBlockSyncMetric(0, ContentModerationActionError)
 		}
@@ -1119,6 +1132,14 @@ func (s *ContentModerationService) checkSync(ctx context.Context, input ContentM
 	if trackPreBlock {
 		s.recordPreBlockSyncMetric(latency, action)
 	}
+	recordHash := blocked && (cfg.PreHashCheckEnabled || cfg.Engine == ContentModerationEngineGroup)
+	if recordHash && s.hashCache != nil {
+		if err := s.hashCache.RecordFlaggedInputHash(ctx, hashText); err == nil {
+			recordHash = false
+		} else {
+			slog.Warn("content_moderation.record_blocked_hash_failed", "user_id", input.UserID, "endpoint", input.Endpoint, "error", err)
+		}
+	}
 	slog.Info("content_moderation.audit_result",
 		"user_id", input.UserID,
 		"api_key_id", input.APIKeyID,
@@ -1139,7 +1160,7 @@ func (s *ContentModerationService) checkSync(ctx context.Context, input ContentM
 		log := s.buildLog(input, cfg, action, flagged, highestCategory, highestScore, result.CategoryScores, content.ExcerptText(), &latency, queueDelay, "")
 		log.EngineMeta = result.EngineMeta
 		if queueDelay == nil && cfg.Mode == ContentModerationModePreBlock {
-			s.enqueueRecord(input, cfg, log, hashText, flagged, flagged)
+			s.enqueueRecord(input, cfg, log, hashText, recordHash || (!blocked && flagged), flagged)
 		} else {
 			s.persistContentModerationLog(ctx, cfg, log, hashText, flagged, flagged)
 		}
@@ -1288,7 +1309,7 @@ func (s *ContentModerationService) worker(id int) {
 				s.asyncProcessed.Add(1)
 				return
 			}
-			if !cfg.Enabled || cfg.Mode == ContentModerationModeOff || len(cfg.apiKeys()) == 0 {
+			if !cfg.Enabled || cfg.Mode == ContentModerationModeOff || (cfg.Engine != ContentModerationEngineGroup && len(cfg.apiKeys()) == 0) {
 				return
 			}
 			if !cfg.includesGroup(task.input.GroupID) {
@@ -1447,6 +1468,11 @@ func (s *ContentModerationService) GetStatus(ctx context.Context) (*ContentModer
 		t := time.Unix(unix, 0)
 		lastCleanupAt = &t
 	}
+	apiKeys := cfg.apiKeys()
+	apiKeyAvailable := s.preBlockAPIKeyAvailableCount(apiKeys, cfg.Engine)
+	if cfg.Engine == ContentModerationEngineGroup && cfg.GroupID != nil && s.groupCaller != nil {
+		apiKeyAvailable = 1
+	}
 	return &ContentModerationRuntimeStatus{
 		Engine:                       cfg.Engine,
 		Enabled:                      cfg.Enabled,
@@ -1469,11 +1495,11 @@ func (s *ContentModerationService) GetStatus(ctx context.Context) (*ContentModer
 		PreBlockBlocked:              s.preBlockBlocked.Load(),
 		PreBlockErrors:               s.preBlockErrors.Load(),
 		PreBlockAvgLatencyMS:         preBlockAvgLatency,
-		PreBlockAPIKeyActive:         s.preBlockAPIKeyActive(cfg.apiKeys(), cfg.Engine),
-		PreBlockAPIKeyAvailableCount: s.preBlockAPIKeyAvailableCount(cfg.apiKeys(), cfg.Engine),
-		PreBlockAPIKeyTotalCalls:     s.preBlockAPIKeyTotalCalls(cfg.apiKeys(), cfg.Engine),
-		PreBlockAPIKeyLoads:          s.preBlockAPIKeyLoads(cfg.apiKeys(), cfg.Engine),
-		APIKeyStatuses:               s.apiKeyStatuses(cfg.apiKeys(), cfg.Engine),
+		PreBlockAPIKeyActive:         s.preBlockAPIKeyActive(apiKeys, cfg.Engine),
+		PreBlockAPIKeyAvailableCount: apiKeyAvailable,
+		PreBlockAPIKeyTotalCalls:     s.preBlockAPIKeyTotalCalls(apiKeys, cfg.Engine),
+		PreBlockAPIKeyLoads:          s.preBlockAPIKeyLoads(apiKeys, cfg.Engine),
+		APIKeyStatuses:               s.apiKeyStatuses(apiKeys, cfg.Engine),
 		FlaggedHashCount:             flaggedHashCount,
 		LastCleanupAt:                lastCleanupAt,
 		LastCleanupDeletedHit:        s.lastCleanupDeletedHit.Load(),
@@ -1720,6 +1746,24 @@ func (s *ContentModerationService) validateConfig(ctx context.Context, cfg *Cont
 	if cfg.ModelFilter.Type != ContentModerationModelFilterAll && len(cfg.ModelFilter.Models) == 0 {
 		return infraerrors.BadRequest("INVALID_CONTENT_MODERATION_MODEL_FILTER", "指定或排除模型时至少需要配置 1 个模型")
 	}
+	if cfg.Engine == ContentModerationEngineGroup {
+		if cfg.GroupID == nil || *cfg.GroupID <= 0 {
+			return infraerrors.BadRequest("INVALID_CONTENT_MODERATION_GROUP", "分组模型必须选择分组")
+		}
+		if strings.TrimSpace(cfg.Model) == "" {
+			return infraerrors.BadRequest("INVALID_CONTENT_MODERATION_MODEL", "分组模型必须选择模型")
+		}
+		if s.groupRepo == nil {
+			return infraerrors.InternalServer("CONTENT_MODERATION_GROUP_UNAVAILABLE", "分组仓储不可用")
+		}
+		group, err := s.groupRepo.GetByIDLite(ctx, *cfg.GroupID)
+		if err != nil || group == nil || group.Status != StatusActive {
+			return infraerrors.BadRequest("INVALID_CONTENT_MODERATION_GROUP", "内容审计分组不存在或未启用")
+		}
+		if group.Platform != PlatformOpenAI && group.Platform != PlatformDeepseek && group.Platform != PlatformKimi && group.Platform != PlatformZhipu && group.Platform != PlatformMiniMax {
+			return infraerrors.BadRequest("INVALID_CONTENT_MODERATION_GROUP_PLATFORM", "内容审计分组必须使用 OpenAI 兼容平台")
+		}
+	}
 	if !cfg.AllGroups && len(cfg.GroupIDs) > 0 && s.groupRepo != nil {
 		for _, groupID := range cfg.GroupIDs {
 			if _, err := s.groupRepo.GetByIDLite(ctx, groupID); err != nil {
@@ -1728,6 +1772,139 @@ func (s *ContentModerationService) validateConfig(ctx context.Context, cfg *Cont
 		}
 	}
 	return nil
+}
+
+func parseGroupModerationResponse(content, model string) (*moderationAPIResult, error) {
+	content = stripGroupModerationThinkBlocks(content)
+	jsonObject, err := extractGroupModerationJSONObject(content)
+	if err != nil {
+		return nil, errors.New("group moderation returned invalid JSON result")
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(jsonObject), &fields); err != nil {
+		return nil, errors.New("group moderation returned invalid JSON result")
+	}
+	flaggedRaw, ok := fields["flagged"]
+	if !ok {
+		return nil, errors.New("group moderation returned invalid JSON result")
+	}
+	flaggedValue := bytes.TrimSpace(flaggedRaw)
+	if !bytes.Equal(flaggedValue, []byte("true")) && !bytes.Equal(flaggedValue, []byte("false")) {
+		return nil, errors.New("group moderation returned invalid JSON result")
+	}
+	var result struct {
+		Flagged    bool     `json:"flagged"`
+		Categories []string `json:"categories"`
+	}
+	if err := json.Unmarshal(flaggedRaw, &result.Flagged); err != nil {
+		return nil, errors.New("group moderation returned invalid JSON result")
+	}
+	categoriesRaw, ok := fields["categories"]
+	if !ok || len(bytes.TrimSpace(categoriesRaw)) == 0 || bytes.TrimSpace(categoriesRaw)[0] != '[' || json.Unmarshal(categoriesRaw, &result.Categories) != nil {
+		return nil, errors.New("group moderation returned invalid JSON result")
+	}
+	scoresRaw, ok := fields["scores"]
+	if !ok || len(bytes.TrimSpace(scoresRaw)) == 0 || bytes.TrimSpace(scoresRaw)[0] != '{' {
+		return nil, errors.New("group moderation returned invalid JSON result")
+	}
+	var rawScores map[string]json.RawMessage
+	if json.Unmarshal(scoresRaw, &rawScores) != nil {
+		return nil, errors.New("group moderation returned invalid JSON result")
+	}
+	defaults := ContentModerationDefaultThresholds()
+	scores := make(map[string]float64, len(rawScores))
+	for category, rawScore := range rawScores {
+		var score float64
+		if bytes.Equal(bytes.TrimSpace(rawScore), []byte("null")) || json.Unmarshal(rawScore, &score) != nil {
+			return nil, errors.New("group moderation returned invalid JSON result")
+		}
+		if _, ok := defaults[category]; !ok || score < 0 || score > 1 {
+			return nil, errors.New("group moderation returned invalid JSON result")
+		}
+		scores[category] = score
+	}
+	for _, category := range result.Categories {
+		if _, ok := defaults[category]; !ok {
+			return nil, errors.New("group moderation returned invalid JSON result")
+		}
+		if scores[category] == 0 {
+			scores[category] = 1
+		}
+	}
+	if result.Flagged && len(scores) == 0 {
+		scores["illicit"] = 1
+	}
+	return &moderationAPIResult{Flagged: result.Flagged, CategoryScores: scores, EngineMeta: &ContentModerationEngineMeta{Engine: ContentModerationEngineGroup, Model: model}}, nil
+}
+
+func stripGroupModerationThinkBlocks(content string) string {
+	for {
+		lower := strings.ToLower(content)
+		start := strings.Index(lower, "<think>")
+		if start < 0 {
+			return content
+		}
+		end := strings.Index(lower[start+len("<think>"):], "</think>")
+		if end < 0 {
+			return content[:start]
+		}
+		end += start + len("<think>") + len("</think>")
+		content = content[:start] + content[end:]
+	}
+}
+
+func extractGroupModerationJSONObject(content string) (string, error) {
+	start := strings.IndexByte(content, '{')
+	if start < 0 {
+		return "", errors.New("JSON object not found")
+	}
+	depth := 0
+	inString := false
+	escaped := false
+	for index := start; index < len(content); index++ {
+		char := content[index]
+		if inString {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if char == '\\' {
+				escaped = true
+				continue
+			}
+			if char == '"' {
+				inString = false
+			}
+			continue
+		}
+		switch char {
+		case '"':
+			inString = true
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				candidate := content[start : index+1]
+				if strings.Contains(content[index+1:], "{") {
+					return "", errors.New("multiple JSON objects found")
+				}
+				return candidate, nil
+			}
+		}
+	}
+	return "", errors.New("incomplete JSON object")
+}
+
+type contentModerationGroupJSONRepairCaller interface {
+	AuditChatWithJSONRepair(ctx context.Context, groupID int64, model, text string, repair bool) (string, error)
+}
+
+func auditContentModerationGroup(ctx context.Context, caller ContentModerationGroupCaller, groupID int64, model, text string, repair bool) (string, error) {
+	if enhanced, ok := caller.(contentModerationGroupJSONRepairCaller); ok {
+		return enhanced.AuditChatWithJSONRepair(ctx, groupID, model, text, repair)
+	}
+	return caller.AuditChat(ctx, groupID, model, text)
 }
 
 func (s *ContentModerationService) callModeration(ctx context.Context, cfg *ContentModerationConfig, input any, trackKeyLoad ...bool) (*moderationAPIResult, error) {
@@ -1739,6 +1916,47 @@ func (s *ContentModerationService) callModeration(ctx context.Context, cfg *Cont
 		attempts = maxContentModerationRetryCount + 1
 	}
 	trackLoad := len(trackKeyLoad) > 0 && trackKeyLoad[0]
+	if cfg.Engine == ContentModerationEngineGroup {
+		if s.groupCaller == nil || cfg.GroupID == nil {
+			return nil, errors.New("group moderation caller unavailable")
+		}
+		text := ""
+		if value, ok := input.(string); ok {
+			text = value
+		}
+		if parts, ok := input.([]moderationAPIInputPart); ok {
+			textParts := make([]string, 0, len(parts))
+			for _, part := range parts {
+				if part.Type == "text" {
+					textParts = append(textParts, part.Text)
+				}
+			}
+			text = strings.Join(textParts, "\n")
+		}
+		var lastErr error
+		for attempt := 0; attempt < attempts; attempt++ {
+			reqCtx, cancel := context.WithTimeout(ctx, time.Duration(cfg.TimeoutMS)*time.Millisecond)
+			response, err := auditContentModerationGroup(reqCtx, s.groupCaller, *cfg.GroupID, cfg.Model, text, attempt > 0)
+			cancel()
+			if err == nil {
+				result, parseErr := parseGroupModerationResponse(response, cfg.Model)
+				if parseErr == nil {
+					return result, nil
+				}
+				err = parseErr
+			}
+			lastErr = err
+			if attempt == attempts-1 {
+				break
+			}
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(time.Duration(100*(attempt+1)) * time.Millisecond):
+			}
+		}
+		return nil, lastErr
+	}
 	var lastErr error
 	for attempt := 0; attempt < attempts; attempt++ {
 		key, ok := s.nextUsableAPIKey(cfg)
@@ -2472,6 +2690,7 @@ func (s *ContentModerationService) configView(cfg *ContentModerationConfig) *Con
 	}
 	return &ContentModerationConfigView{
 		Engine:                         cfg.Engine,
+		GroupID:                        cloneInt64Ptr(cfg.GroupID),
 		Enabled:                        cfg.Enabled,
 		Mode:                           cfg.Mode,
 		BaseURL:                        cfg.BaseURL,
